@@ -156,7 +156,7 @@ def _make_contact_options():
     return [
         ft.DropdownOption(
             key=str(contact["id"]),
-            text=f"{contact['name']} ({contact['phone']})",
+            text=f"{contact['name']} - {contact['phone']}",
         )
         for contact in get_all_contacts()
     ]
@@ -737,11 +737,74 @@ def _build_app(page: ft.Page):
             _make_group_options(include_no_group=True),
         )
         error_text = ft.Text("", color=RED, size=13, visible=False)
+        search_contacts_field = ft.TextField(
+            hint_text="Search by name or phone...",
+            prefix_icon=ft.Icons.SEARCH,
+            height=44,
+            max_lines=1,
+            border_radius=8,
+            border_color=BORDER,
+            focused_border_color=TEAL,
+            filled=True,
+            fill_color=SURFACE_MUTED,
+            content_padding=ft.padding.symmetric(horizontal=14, vertical=12),
+        )
 
         def set_error(message):
             error_text.value = message
             error_text.visible = bool(message)
             dialog.update()
+
+        def filter_contacts_by_search(search_keyword=""):
+            """Filter contacts based on search keyword (name or phone)."""
+            if not search_keyword or not search_keyword.strip():
+                return get_all_contacts()
+            
+            keyword = search_keyword.strip().lower()
+            filtered = []
+            for contact in get_all_contacts():
+                if (keyword in contact["name"].lower() or 
+                    keyword in contact["phone"].lower()):
+                    filtered.append(contact)
+            return filtered
+
+        def render_contacts_list(_e=None):
+            """Render contact list based on current search."""
+            contact_list.controls = []
+            filtered_contacts = filter_contacts_by_search(search_contacts_field.value)
+            
+            if not filtered_contacts:
+                contact_list.controls.append(
+                    ft.Container(
+                        content=ft.Text("No contacts found.", color=MUTED),
+                        alignment=CENTER,
+                        height=100,
+                    )
+                )
+            else:
+                for contact in filtered_contacts:
+                    contact_id = contact["id"]
+                    is_checked = selected_contacts.get(contact_id, False)
+                    
+                    def toggle_contact(e, cid=contact_id):
+                        selected_contacts[cid] = e.control.value
+                        dialog.update()
+                    
+                    checkbox = ft.Checkbox(
+                        label=f"{contact['name']} - {contact['phone']}",
+                        value=is_checked,
+                        on_change=toggle_contact,
+                    )
+                    contact_list.controls.append(checkbox)
+            
+            # Only update dialog if it's been added to the page
+            try:
+                dialog.update()
+            except:
+                pass
+
+        # Attach the on_change event after render_contacts_list is defined
+        search_contacts_field.on_change = render_contacts_list
 
         def render_groups():
             contacts = get_all_contacts()
@@ -816,21 +879,7 @@ def _build_app(page: ft.Page):
 
         def refresh_group_dialog(update_dialog=True):
             # Refresh contact list with checkboxes
-            contact_list.controls = []
-            for contact in get_all_contacts():
-                contact_id = contact["id"]
-                is_checked = selected_contacts.get(contact_id, False)
-                
-                def toggle_contact(e, cid=contact_id):
-                    selected_contacts[cid] = e.control.value
-                    dialog.update()
-                
-                checkbox = ft.Checkbox(
-                    label=f"{contact['name']} ({contact['phone']})",
-                    value=is_checked,
-                    on_change=toggle_contact,
-                )
-                contact_list.controls.append(checkbox)
+            render_contacts_list()
 
             assign_group_field.options = _make_group_options(include_no_group=True)
             if assign_group_field.value not in [option.key for option in assign_group_field.options]:
@@ -965,6 +1014,7 @@ def _build_app(page: ft.Page):
                                         size=12,
                                         color=MUTED,
                                     ),
+                                    search_contacts_field,
                                     contact_list,
                                     ft.Divider(color=BORDER),
                                     assign_group_field,
