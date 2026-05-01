@@ -1,4 +1,8 @@
-def get_all_contacts(cursor):
-    query = "SELECT contactID, name, phoneNumber, email, address FROM Contacts ORDER BY name ASC"
-    cursor.execute(query)
-    return cursor.fetchall()
+"""View-contact workflow."""
+
+import database
+
+
+def get_all_contacts():
+    """Return all saved contacts."""
+    return database.get_all_contacts()

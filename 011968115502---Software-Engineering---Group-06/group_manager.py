@@ -1,83 +1,48 @@
-from database import connect_db
+"""Group management workflows."""
+
+import database
+
+
+def _clean_group_name(group_name):
+    if not group_name or not group_name.strip():
+        raise ValueError("Group name must not be empty.")
+    return group_name.strip()
 
 
 def create_group(group_name):
-    conn = connect_db()
-    cursor = conn.cursor()
-
-    try:
-        cursor.execute("INSERT INTO groups (name) VALUES (?)", (group_name,))
-        conn.commit()
-        print("Group created successfully!")
-    except:
-        print("Group already exists!")
-
-    conn.close()
+    """Create a new contact group."""
+    return database.create_group(_clean_group_name(group_name))
 
 
 def delete_group(group_id):
-    conn = connect_db()
-    cursor = conn.cursor()
-
-    cursor.execute("""
-    UPDATE contacts
-    SET group_id = NULL
-    WHERE group_id = ?
-    """, (group_id,))
-
-    cursor.execute("DELETE FROM groups WHERE id=?", (group_id,))
-
-    conn.commit()
-    conn.close()
-    print("Group deleted successfully!")
+    """Delete a group by id."""
+    affected_rows = database.delete_group(group_id)
+    if affected_rows == 0:
+        raise ValueError("Group not found.")
+    return affected_rows
 
 
 def rename_group(group_id, new_name):
-    conn = connect_db()
-    cursor = conn.cursor()
-
-    try:
-        cursor.execute("""
-        UPDATE groups
-        SET name=?
-        WHERE id=?
-        """, (new_name, group_id))
-
-        conn.commit()
-        print("Group renamed successfully!")
-    except:
-        print("Error renaming group!")
-
-    conn.close()
+    """Rename an existing group."""
+    affected_rows = database.rename_group(group_id, _clean_group_name(new_name))
+    if affected_rows == 0:
+        raise ValueError("Group not found.")
+    return affected_rows
 
 
 def assign_contact_to_group(contact_id, group_id):
-    conn = connect_db()
-    cursor = conn.cursor()
-
-    cursor.execute("""
-    UPDATE contacts
-    SET group_id=?
-    WHERE id=?
-    """, (group_id, contact_id))
-
-    conn.commit()
-    conn.close()
-
-    print("Contact assigned to group!")
+    """Assign a contact to a group, or clear the group with None."""
+    affected_rows = database.assign_contact_to_group(contact_id, group_id)
+    if affected_rows == 0:
+        raise ValueError("Contact not found.")
+    return affected_rows
 
 
 def get_contacts_by_group(group_id):
-    conn = connect_db()
-    cursor = conn.cursor()
+    """Return contacts that belong to a group."""
+    return database.get_contacts_by_group(group_id)
 
-    cursor.execute("""
-    SELECT id, name, phone, email, address
-    FROM contacts
-    WHERE group_id=?
-    """, (group_id,))
 
-    data = cursor.fetchall()
-    conn.close()
-
-    return data
+def get_groups():
+    """Return all groups."""
+    return database.get_all_groups()

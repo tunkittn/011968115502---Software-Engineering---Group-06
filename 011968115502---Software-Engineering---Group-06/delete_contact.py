@@ -1,15 +1,11 @@
-from database import load_contacts, save_contacts
+"""Delete-contact workflow."""
 
-def delete_contact():
-    contacts = load_contacts()
+import database
 
-    name = input("Enter contact name to delete: ")
 
-    for contact in contacts:
-        if contact["name"].lower() == name.lower():
-            contacts.remove(contact)
-            save_contacts(contacts)
-            print("Deleted successfully!")
-            return
-
-    print("Contact not found!")
+def delete_contact(contact_id):
+    """Delete a contact by id."""
+    affected_rows = database.delete_contact(contact_id)
+    if affected_rows == 0:
+        raise ValueError("Contact not found.")
+    return affected_rows

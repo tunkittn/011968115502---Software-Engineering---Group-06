@@ -1,21 +1,26 @@
-from database import load_contacts, save_contacts
+"""Edit-contact workflow."""
 
-def edit_contact():
-    contacts = load_contacts()
+import database
+from add_contact import normalize_contact, validate_contact
 
-    name = input("Enter contact name to edit: ")
 
-    for contact in contacts:
-        if contact["name"].lower() == name.lower():
-            print("Old Information:")
-            print("Name:", contact["name"])
-            print("Phone:", contact["phone"])
+def edit_contact(contact_id, name, phone, email="", address="", group_id=None):
+    """Validate and update an existing contact."""
+    clean_name, clean_phone, clean_email, clean_address, clean_group_id = (
+        normalize_contact(name, phone, email, address, group_id)
+    )
+    is_valid, message = validate_contact(clean_name, clean_phone, clean_email)
+    if not is_valid:
+        raise ValueError(message)
 
-            new_phone = input("Enter new phone number: ")
-            contact["phone"] = new_phone
-
-            save_contacts(contacts)
-            print("Updated successfully!")
-            return
-
-    print("Contact not found!")
+    affected_rows = database.update_contact(
+        contact_id,
+        clean_name,
+        clean_phone,
+        clean_email,
+        clean_address,
+        clean_group_id,
+    )
+    if affected_rows == 0:
+        raise ValueError("Contact not found.")
+    return affected_rows

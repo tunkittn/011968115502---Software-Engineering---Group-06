@@ -1,25 +1,53 @@
+"""Contact model used by the phone book application."""
+
+from dataclasses import dataclass
+
+
+@dataclass
 class Contact:
-    def __init__(self, contact_id, name, phone_number, email="", address=""):
-        self._contact_id = contact_id
-        self._name = name
-        self._phone_number = phone_number
-        self._email = email
-        self._address = address
+    """Represents one contact record in the phone book."""
+
+    contact_id: int | None
+    name: str
+    phone_number: str
+    email: str = ""
+    address: str = ""
+    group_id: int | None = None
+    group_name: str = ""
+
+    @classmethod
+    def from_row(cls, row):
+        """Build a Contact object from a sqlite3.Row or mapping."""
+        return cls(
+            contact_id=row["id"],
+            name=row["name"],
+            phone_number=row["phone"],
+            email=row["email"] or "",
+            address=row["address"] or "",
+            group_id=row["group_id"],
+            group_name=row["group_name"] or "",
+        )
 
     def get_name(self):
-        return self._name
+        return self.name
 
     def set_name(self, name):
-        self._name = name
+        self.name = name
 
     def get_phone_number(self):
-        return self._phone_number
+        return self.phone_number
 
     def set_phone_number(self, phone):
-        self._phone_number = phone
-        
+        self.phone_number = phone
+
     def get_email(self):
-        return self._email
-        
+        return self.email
+
+    def set_email(self, email):
+        self.email = email
+
     def get_address(self):
-        return self._address
+        return self.address
+
+    def set_address(self, address):
+        self.address = address
