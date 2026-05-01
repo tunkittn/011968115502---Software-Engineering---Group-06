@@ -1,7 +1,6 @@
-"""Tkinter user interface for the Phone Book Management System."""
+"""Flet user interface for the Phone Book Management System."""
 
-import tkinter as tk
-from tkinter import messagebox, ttk
+import flet as ft
 
 from add_contact import add_contact
 from database import get_contact_by_id, init_database
@@ -19,534 +18,1234 @@ from view_contact import get_all_contacts
 
 NO_GROUP_LABEL = "No group"
 
+BG = "#F5F7FA"
+SURFACE = "#FFFFFF"
+SURFACE_MUTED = "#F8FAFC"
+BORDER = "#D7DEE8"
+TEXT = "#1F2937"
+MUTED = "#64748B"
+TEAL = "#0F766E"
+TEAL_LIGHT = "#CCFBF1"
+BLUE = "#2563EB"
+GREEN = "#15803D"
+AMBER = "#B45309"
+RED = "#B91C1C"
+CENTER = ft.Alignment(0, 0)
+
 
 def _value_or_empty(value):
-    return "" if value is None else value
+    return "" if value is None else str(value)
 
 
-class ContactFormDialog(tk.Toplevel):
-    """Dialog used for both adding and editing contacts."""
+def _safe_text(value):
+    return _value_or_empty(value) or "-"
 
-    def __init__(self, parent, title, contact=None, on_saved=None):
-        super().__init__(parent)
-        self.title(title)
-        self.resizable(False, False)
-        self.contact = contact
-        self.on_saved = on_saved
-        self.group_lookup = {}
 
-        self.name_var = tk.StringVar()
-        self.phone_var = tk.StringVar()
-        self.email_var = tk.StringVar()
-        self.address_var = tk.StringVar()
-        self.group_var = tk.StringVar(value=NO_GROUP_LABEL)
+def _group_value(group_id):
+    return "" if group_id in ("", None) else str(group_id)
 
-        self._build_form()
-        self._load_groups()
-        self._load_contact()
 
-        self.transient(parent)
-        self.grab_set()
-        self.name_entry.focus_set()
+def _parse_group_id(value):
+    return None if value in ("", None) else int(value)
 
-    def _build_form(self):
-        frame = ttk.Frame(self, padding=16)
-        frame.grid(row=0, column=0, sticky="nsew")
 
-        labels = ["Name *", "Phone *", "Email", "Address", "Group"]
-        for index, label in enumerate(labels):
-            ttk.Label(frame, text=label).grid(
-                row=index, column=0, sticky="w", padx=(0, 10), pady=6
-            )
+def _contact_group(contact):
+    return contact.get("group_name") or NO_GROUP_LABEL
 
-        self.name_entry = ttk.Entry(frame, textvariable=self.name_var, width=36)
-        self.phone_entry = ttk.Entry(frame, textvariable=self.phone_var, width=36)
-        self.email_entry = ttk.Entry(frame, textvariable=self.email_var, width=36)
-        self.address_entry = ttk.Entry(frame, textvariable=self.address_var, width=36)
-        self.group_combo = ttk.Combobox(
-            frame, textvariable=self.group_var, width=33, state="readonly"
+
+def _dialog_title(icon, title):
+    return ft.Row(
+        [
+            ft.Container(
+                ft.Icon(icon, color=TEAL, size=20),
+                width=36,
+                height=36,
+                border_radius=8,
+                bgcolor=TEAL_LIGHT,
+                alignment=CENTER,
+            ),
+            ft.Text(title, size=20, weight=ft.FontWeight.W_700, color=TEXT),
+        ],
+        spacing=10,
+    )
+
+
+def _field(label, icon, value="", **kwargs):
+    return ft.TextField(
+        label=label,
+        value=value or "",
+        prefix_icon=icon,
+        border_radius=8,
+        border_color=BORDER,
+        focused_border_color=TEAL,
+        filled=True,
+        fill_color=SURFACE_MUTED,
+        content_padding=ft.padding.symmetric(horizontal=14, vertical=12),
+        **kwargs,
+    )
+
+
+def _dropdown(label, value, options, icon=ft.Icons.BADGE_OUTLINED):
+    return ft.Dropdown(
+        label=label,
+        value=value,
+        options=options,
+        leading_icon=icon,
+        border_radius=8,
+        border_color=BORDER,
+        focused_border_color=TEAL,
+        filled=True,
+        fill_color=SURFACE_MUTED,
+        content_padding=ft.padding.symmetric(horizontal=14, vertical=12),
+        enable_search=True,
+    )
+
+
+def _button_style(bgcolor=None, color=None):
+    return ft.ButtonStyle(
+        bgcolor=bgcolor,
+        color=color,
+        shape=ft.RoundedRectangleBorder(radius=8),
+        padding=ft.padding.symmetric(horizontal=16, vertical=12),
+    )
+
+
+def _metric_card(label, value_control, icon, color, on_click=None):
+    return ft.Container(
+        content=ft.Row(
+            [
+                ft.Container(
+                    ft.Icon(icon, size=20, color=color),
+                    width=40,
+                    height=40,
+                    border_radius=8,
+                    bgcolor=ft.Colors.with_opacity(0.10, color),
+                    alignment=CENTER,
+                ),
+                ft.Column(
+                    [
+                        ft.Text(label, size=12, color=MUTED),
+                        value_control,
+                    ],
+                    spacing=0,
+                    tight=True,
+                ),
+            ],
+            spacing=12,
+        ),
+        padding=16,
+        bgcolor=SURFACE,
+        border=ft.border.all(1, BORDER),
+        border_radius=8,
+        expand=True,
+        on_click=on_click,
+        ink=True,
+    )
+
+
+def _make_group_options(include_no_group=True):
+    options = []
+    if include_no_group:
+        options.append(ft.DropdownOption(key="", text=NO_GROUP_LABEL))
+    for group in get_groups():
+        options.append(ft.DropdownOption(key=str(group["id"]), text=group["name"]))
+    return options
+
+
+def _make_contact_options():
+    return [
+        ft.DropdownOption(
+            key=str(contact["id"]),
+            text=f"{contact['name']} ({contact['phone']})",
         )
+        for contact in get_all_contacts()
+    ]
 
-        widgets = [
-            self.name_entry,
-            self.phone_entry,
-            self.email_entry,
-            self.address_entry,
-            self.group_combo,
-        ]
-        for index, widget in enumerate(widgets):
-            widget.grid(row=index, column=1, sticky="ew", pady=6)
 
-        button_frame = ttk.Frame(frame)
-        button_frame.grid(row=len(labels), column=0, columnspan=2, sticky="e", pady=(14, 0))
-        ttk.Button(button_frame, text="Save", command=self._save).grid(
-            row=0, column=0, padx=(0, 8)
+def _show_snack(page, message, color=TEAL):
+    page.show_dialog(
+        ft.SnackBar(
+            content=ft.Text(message, color=ft.Colors.WHITE),
+            bgcolor=color,
+            behavior=ft.SnackBarBehavior.FLOATING,
+            show_close_icon=True,
         )
-        ttk.Button(button_frame, text="Cancel", command=self.destroy).grid(
-            row=0, column=1
+    )
+
+
+def _show_error(page, message):
+    page.show_dialog(
+        ft.AlertDialog(
+            modal=True,
+            title=_dialog_title(ft.Icons.ERROR_OUTLINE, "Error"),
+            content=ft.Text(message, color=TEXT),
+            actions=[
+                ft.TextButton("Close", on_click=lambda _e: page.pop_dialog()),
+            ],
         )
-
-    def _load_groups(self):
-        group_options = [NO_GROUP_LABEL]
-        self.group_lookup = {NO_GROUP_LABEL: None}
-        for group in get_groups():
-            label = f"{group['id']} - {group['name']}"
-            group_options.append(label)
-            self.group_lookup[label] = group["id"]
-        self.group_combo["values"] = group_options
-
-    def _load_contact(self):
-        if not self.contact:
-            return
-
-        self.name_var.set(self.contact["name"])
-        self.phone_var.set(self.contact["phone"])
-        self.email_var.set(_value_or_empty(self.contact["email"]))
-        self.address_var.set(_value_or_empty(self.contact["address"]))
-
-        group_id = self.contact["group_id"]
-        for label, value in self.group_lookup.items():
-            if value == group_id:
-                self.group_var.set(label)
-                break
-
-    def _selected_group_id(self):
-        return self.group_lookup.get(self.group_var.get())
-
-    def _save(self):
-        try:
-            if self.contact:
-                edit_contact(
-                    self.contact["id"],
-                    self.name_var.get(),
-                    self.phone_var.get(),
-                    self.email_var.get(),
-                    self.address_var.get(),
-                    self._selected_group_id(),
-                )
-                messagebox.showinfo(
-                    "Contact Updated",
-                    "Contact information was updated successfully.",
-                    parent=self,
-                )
-            else:
-                add_contact(
-                    self.name_var.get(),
-                    self.phone_var.get(),
-                    self.email_var.get(),
-                    self.address_var.get(),
-                    self._selected_group_id(),
-                )
-                messagebox.showinfo(
-                    "Contact Added",
-                    "New contact was added successfully.",
-                    parent=self,
-                )
-
-            if self.on_saved:
-                self.on_saved()
-            self.destroy()
-        except ValueError as exc:
-            messagebox.showerror("Invalid Input", str(exc), parent=self)
-        except Exception as exc:
-            messagebox.showerror("Error", f"Could not save contact.\n{exc}", parent=self)
-
-
-class GroupManagerDialog(tk.Toplevel):
-    """Dialog for creating, renaming, deleting, and assigning groups."""
-
-    def __init__(self, parent, on_changed=None):
-        super().__init__(parent)
-        self.title("Manage Groups")
-        self.geometry("720x420")
-        self.minsize(640, 360)
-        self.on_changed = on_changed
-
-        self.group_name_var = tk.StringVar()
-        self.contact_var = tk.StringVar()
-        self.assign_group_var = tk.StringVar(value=NO_GROUP_LABEL)
-        self.contact_lookup = {}
-        self.group_lookup = {NO_GROUP_LABEL: None}
-
-        self._build_layout()
-        self.refresh_data()
-
-        self.transient(parent)
-        self.grab_set()
-
-    def _build_layout(self):
-        self.columnconfigure(0, weight=1)
-        self.rowconfigure(0, weight=1)
-
-        root = ttk.Frame(self, padding=12)
-        root.grid(row=0, column=0, sticky="nsew")
-        root.columnconfigure(0, weight=1)
-        root.columnconfigure(1, weight=1)
-        root.rowconfigure(0, weight=1)
-
-        group_frame = ttk.LabelFrame(root, text="Groups", padding=10)
-        group_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
-        group_frame.columnconfigure(0, weight=1)
-        group_frame.rowconfigure(0, weight=1)
-
-        self.group_tree = ttk.Treeview(
-            group_frame,
-            columns=("id", "name"),
-            displaycolumns=("name",),
-            show="headings",
-            selectmode="browse",
-        )
-        self.group_tree.heading("name", text="Group Name")
-        self.group_tree.column("name", width=220, anchor="w")
-        self.group_tree.grid(row=0, column=0, sticky="nsew")
-        self.group_tree.bind("<<TreeviewSelect>>", self._on_group_selected)
-
-        group_scroll = ttk.Scrollbar(
-            group_frame, orient="vertical", command=self.group_tree.yview
-        )
-        group_scroll.grid(row=0, column=1, sticky="ns")
-        self.group_tree.configure(yscrollcommand=group_scroll.set)
-
-        ttk.Label(group_frame, text="Group name").grid(
-            row=1, column=0, sticky="w", pady=(12, 4)
-        )
-        ttk.Entry(group_frame, textvariable=self.group_name_var).grid(
-            row=2, column=0, sticky="ew", pady=(0, 8)
-        )
-
-        group_buttons = ttk.Frame(group_frame)
-        group_buttons.grid(row=3, column=0, sticky="ew")
-        ttk.Button(group_buttons, text="Create", command=self._create_group).grid(
-            row=0, column=0, padx=(0, 6)
-        )
-        ttk.Button(group_buttons, text="Rename", command=self._rename_group).grid(
-            row=0, column=1, padx=(0, 6)
-        )
-        ttk.Button(group_buttons, text="Delete", command=self._delete_group).grid(
-            row=0, column=2
-        )
-
-        assign_frame = ttk.LabelFrame(root, text="Assign Contact to Group", padding=10)
-        assign_frame.grid(row=0, column=1, sticky="nsew")
-        assign_frame.columnconfigure(0, weight=1)
-
-        ttk.Label(assign_frame, text="Contact").grid(row=0, column=0, sticky="w")
-        self.contact_combo = ttk.Combobox(
-            assign_frame, textvariable=self.contact_var, state="readonly"
-        )
-        self.contact_combo.grid(row=1, column=0, sticky="ew", pady=(4, 12))
-
-        ttk.Label(assign_frame, text="Group").grid(row=2, column=0, sticky="w")
-        self.assign_group_combo = ttk.Combobox(
-            assign_frame, textvariable=self.assign_group_var, state="readonly"
-        )
-        self.assign_group_combo.grid(row=3, column=0, sticky="ew", pady=(4, 12))
-
-        ttk.Button(
-            assign_frame,
-            text="Assign",
-            command=self._assign_contact,
-        ).grid(row=4, column=0, sticky="e")
-
-        ttk.Button(root, text="Close", command=self.destroy).grid(
-            row=1, column=1, sticky="e", pady=(12, 0)
-        )
-
-    def refresh_data(self):
-        self._refresh_groups()
-        self._refresh_contacts()
-
-    def _refresh_groups(self):
-        for item in self.group_tree.get_children():
-            self.group_tree.delete(item)
-
-        group_labels = [NO_GROUP_LABEL]
-        self.group_lookup = {NO_GROUP_LABEL: None}
-        for group in get_groups():
-            self.group_tree.insert("", tk.END, values=(group["id"], group["name"]))
-            label = f"{group['id']} - {group['name']}"
-            group_labels.append(label)
-            self.group_lookup[label] = group["id"]
-
-        self.assign_group_combo["values"] = group_labels
-        if self.assign_group_var.get() not in group_labels:
-            self.assign_group_var.set(NO_GROUP_LABEL)
-
-    def _refresh_contacts(self):
-        contact_labels = []
-        self.contact_lookup = {}
-        for contact in get_all_contacts():
-            label = f"{contact['id']} - {contact['name']} ({contact['phone']})"
-            contact_labels.append(label)
-            self.contact_lookup[label] = contact["id"]
-
-        self.contact_combo["values"] = contact_labels
-        if contact_labels and self.contact_var.get() not in contact_labels:
-            self.contact_var.set(contact_labels[0])
-        elif not contact_labels:
-            self.contact_var.set("")
-
-    def _selected_group_id(self):
-        selection = self.group_tree.selection()
-        if not selection:
-            raise ValueError("Please select a group.")
-        return int(self.group_tree.item(selection[0], "values")[0])
-
-    def _on_group_selected(self, _event=None):
-        selection = self.group_tree.selection()
-        if selection:
-            values = self.group_tree.item(selection[0], "values")
-            self.group_name_var.set(values[1])
-
-    def _after_group_change(self):
-        self.refresh_data()
-        if self.on_changed:
-            self.on_changed()
-
-    def _create_group(self):
-        try:
-            create_group(self.group_name_var.get())
-            self.group_name_var.set("")
-            self._after_group_change()
-        except ValueError as exc:
-            messagebox.showerror("Invalid Group", str(exc), parent=self)
-        except Exception as exc:
-            messagebox.showerror("Error", f"Could not create group.\n{exc}", parent=self)
-
-    def _rename_group(self):
-        try:
-            group_id = self._selected_group_id()
-            rename_group(group_id, self.group_name_var.get())
-            self._after_group_change()
-        except ValueError as exc:
-            messagebox.showerror("Invalid Group", str(exc), parent=self)
-        except Exception as exc:
-            messagebox.showerror("Error", f"Could not rename group.\n{exc}", parent=self)
-
-    def _delete_group(self):
-        try:
-            group_id = self._selected_group_id()
-            if not messagebox.askyesno(
-                "Delete Group",
-                "Delete this group? Contacts in the group will be kept.",
-                parent=self,
-            ):
-                return
-            delete_group(group_id)
-            self.group_name_var.set("")
-            self._after_group_change()
-        except ValueError as exc:
-            messagebox.showerror("Invalid Group", str(exc), parent=self)
-        except Exception as exc:
-            messagebox.showerror("Error", f"Could not delete group.\n{exc}", parent=self)
-
-    def _assign_contact(self):
-        try:
-            contact_label = self.contact_var.get()
-            if contact_label not in self.contact_lookup:
-                raise ValueError("Please select a contact.")
-            group_id = self.group_lookup.get(self.assign_group_var.get())
-            assign_contact_to_group(self.contact_lookup[contact_label], group_id)
-            self._after_group_change()
-            messagebox.showinfo(
-                "Group Updated",
-                "Contact group was updated successfully.",
-                parent=self,
-            )
-        except ValueError as exc:
-            messagebox.showerror("Invalid Assignment", str(exc), parent=self)
-        except Exception as exc:
-            messagebox.showerror("Error", f"Could not assign contact.\n{exc}", parent=self)
-
-
-class PhoneBookApp(tk.Tk):
-    """Main application window."""
-
-    def __init__(self):
-        init_database()
-        super().__init__()
-        self.title("Phone Book Management System")
-        self.geometry("980x560")
-        self.minsize(840, 460)
-
-        self.search_var = tk.StringVar()
-        self.status_var = tk.StringVar()
-
-        self._build_layout()
-        self.refresh_contacts()
-
-    def _build_layout(self):
-        self.columnconfigure(0, weight=1)
-        self.rowconfigure(1, weight=1)
-
-        toolbar = ttk.Frame(self, padding=(12, 12, 12, 6))
-        toolbar.grid(row=0, column=0, sticky="ew")
-        toolbar.columnconfigure(1, weight=1)
-
-        ttk.Label(toolbar, text="Search").grid(row=0, column=0, padx=(0, 8))
-        search_entry = ttk.Entry(toolbar, textvariable=self.search_var)
-        search_entry.grid(row=0, column=1, sticky="ew", padx=(0, 8))
-        search_entry.bind("<KeyRelease>", self._on_search_changed)
-
-        ttk.Button(toolbar, text="Add Contact", command=self.open_add_contact).grid(
-            row=0, column=2, padx=(0, 6)
-        )
-        ttk.Button(toolbar, text="Edit", command=self.open_edit_contact).grid(
-            row=0, column=3, padx=(0, 6)
-        )
-        ttk.Button(toolbar, text="Delete", command=self.delete_selected_contact).grid(
-            row=0, column=4, padx=(0, 6)
-        )
-        ttk.Button(toolbar, text="Manage Groups", command=self.open_group_manager).grid(
-            row=0, column=5, padx=(0, 6)
-        )
-        ttk.Button(toolbar, text="Refresh", command=self.reset_search).grid(
-            row=0, column=6
-        )
-
-        table_frame = ttk.Frame(self, padding=(12, 0, 12, 6))
-        table_frame.grid(row=1, column=0, sticky="nsew")
-        table_frame.columnconfigure(0, weight=1)
-        table_frame.rowconfigure(0, weight=1)
-
-        columns = ("id", "name", "phone", "email", "address", "group")
-        self.contact_tree = ttk.Treeview(
-            table_frame,
-            columns=columns,
-            displaycolumns=("name", "phone", "email", "address", "group"),
-            show="headings",
-            selectmode="browse",
-        )
-
-        headings = {
-            "name": "Name",
-            "phone": "Phone",
-            "email": "Email",
-            "address": "Address",
-            "group": "Group",
-        }
-        widths = {
-            "name": 180,
-            "phone": 120,
-            "email": 180,
-            "address": 260,
-            "group": 120,
-        }
-        for column, heading in headings.items():
-            self.contact_tree.heading(column, text=heading)
-            self.contact_tree.column(column, width=widths[column], anchor="w")
-
-        self.contact_tree.grid(row=0, column=0, sticky="nsew")
-        self.contact_tree.bind("<Double-1>", self.open_edit_contact)
-
-        y_scroll = ttk.Scrollbar(
-            table_frame, orient="vertical", command=self.contact_tree.yview
-        )
-        y_scroll.grid(row=0, column=1, sticky="ns")
-        self.contact_tree.configure(yscrollcommand=y_scroll.set)
-
-        status_bar = ttk.Frame(self, padding=(12, 0, 12, 10))
-        status_bar.grid(row=2, column=0, sticky="ew")
-        ttk.Label(status_bar, textvariable=self.status_var).grid(row=0, column=0, sticky="w")
-
-    def refresh_contacts(self, rows=None):
-        try:
-            contacts = get_all_contacts() if rows is None else rows
-            for item in self.contact_tree.get_children():
-                self.contact_tree.delete(item)
-
-            for contact in contacts:
-                self.contact_tree.insert(
-                    "",
-                    tk.END,
-                    values=(
-                        contact["id"],
-                        contact["name"],
-                        contact["phone"],
-                        _value_or_empty(contact["email"]),
-                        _value_or_empty(contact["address"]),
-                        _value_or_empty(contact["group_name"]),
-                    ),
-                )
-
-            self.status_var.set(f"{len(contacts)} contact(s)")
-        except Exception as exc:
-            messagebox.showerror("Error", f"Could not load contacts.\n{exc}", parent=self)
-
-    def reset_search(self):
-        self.search_var.set("")
-        self.refresh_contacts()
-
-    def _on_search_changed(self, _event=None):
-        keyword = self.search_var.get().strip()
-        try:
-            if keyword:
-                self.refresh_contacts(search_contacts(keyword))
-            else:
-                self.refresh_contacts()
-        except Exception as exc:
-            messagebox.showerror("Error", f"Could not search contacts.\n{exc}", parent=self)
-
-    def _selected_contact_id(self):
-        selection = self.contact_tree.selection()
-        if not selection:
-            messagebox.showwarning("No Contact Selected", "Please select a contact.", parent=self)
-            return None
-        values = self.contact_tree.item(selection[0], "values")
-        return int(values[0])
-
-    def _selected_contact(self):
-        contact_id = self._selected_contact_id()
-        if contact_id is None:
-            return None
-        contact = get_contact_by_id(contact_id)
-        if contact is None:
-            messagebox.showerror("Not Found", "The selected contact no longer exists.", parent=self)
-            self.refresh_contacts()
-        return contact
-
-    def open_add_contact(self):
-        ContactFormDialog(self, "Add Contact", on_saved=self.refresh_contacts)
-
-    def open_edit_contact(self, _event=None):
-        contact = self._selected_contact()
-        if contact:
-            ContactFormDialog(
-                self,
-                "Edit Contact",
-                contact=contact,
-                on_saved=self.refresh_contacts,
-            )
-
-    def delete_selected_contact(self):
-        contact = self._selected_contact()
-        if not contact:
-            return
-        if not messagebox.askyesno(
-            "Delete Contact",
-            f"Delete contact '{contact['name']}'?",
-            parent=self,
-        ):
-            return
-        try:
-            remove_contact(contact["id"])
-            self.refresh_contacts()
-            messagebox.showinfo(
-                "Contact Deleted",
-                "Contact was deleted successfully.",
-                parent=self,
-            )
-        except Exception as exc:
-            messagebox.showerror("Error", f"Could not delete contact.\n{exc}", parent=self)
-
-    def open_group_manager(self):
-        GroupManagerDialog(self, on_changed=self.refresh_contacts)
+    )
 
 
 def main():
-    """Start the desktop application."""
-    app = PhoneBookApp()
-    app.mainloop()
+    """Start the Flet desktop application."""
+    ft.app(target=_build_app, view=ft.AppView.FLET_APP)
+
+
+def _build_app(page: ft.Page):
+    init_database()
+
+    page.title = "Phone Book Management System"
+    page.bgcolor = BG
+    page.padding = 0
+    page.theme_mode = ft.ThemeMode.LIGHT
+    page.theme = ft.Theme(color_scheme_seed=TEAL)
+
+    state = {
+        "contacts": [],
+        "selected_contact_id": None,
+        "search": "",
+        "filter_group_id": None,
+        "filter_group_name": None,
+    }
+
+    search_field = ft.TextField(
+        hint_text="Search by name, phone, or group",
+        prefix_icon=ft.Icons.SEARCH,
+        height=54,
+        max_lines=1,
+        expand=True,
+        border_radius=8,
+        border_color=BORDER,
+        focused_border_color=TEAL,
+        filled=True,
+        fill_color=SURFACE_MUTED,
+        content_padding=ft.padding.symmetric(horizontal=14, vertical=12),
+        on_change=lambda _e: refresh_contacts(),
+    )
+    contact_count_text = ft.Text("0", size=22, weight=ft.FontWeight.W_700, color=TEXT)
+    group_count_text = ft.Text("0", size=22, weight=ft.FontWeight.W_700, color=TEXT)
+    selected_count_text = ft.Text(
+        "None",
+        size=22,
+        weight=ft.FontWeight.W_700,
+        color=TEXT,
+        max_lines=1,
+        overflow=ft.TextOverflow.ELLIPSIS,
+    )
+
+    detail_name = ft.Text(
+        "Select a contact",
+        size=20,
+        weight=ft.FontWeight.W_700,
+        color=TEXT,
+        max_lines=2,
+        overflow=ft.TextOverflow.ELLIPSIS,
+    )
+    detail_phone = ft.Text(
+        "-",
+        size=14,
+        color=MUTED,
+        max_lines=1,
+        overflow=ft.TextOverflow.ELLIPSIS,
+        expand=True,
+    )
+    detail_email = ft.Text(
+        "-",
+        size=14,
+        color=MUTED,
+        max_lines=2,
+        overflow=ft.TextOverflow.ELLIPSIS,
+        expand=True,
+    )
+    detail_address = ft.Text(
+        "-",
+        size=14,
+        color=MUTED,
+        max_lines=3,
+        overflow=ft.TextOverflow.ELLIPSIS,
+        expand=True,
+    )
+    detail_group = ft.Text(
+        NO_GROUP_LABEL,
+        size=14,
+        color=MUTED,
+        expand=True,
+    )
+
+    table_area = ft.Column(
+        expand=True,
+        scroll=ft.ScrollMode.AUTO,
+        spacing=0,
+        horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+    )
+
+    def selected_contact():
+        contact_id = state["selected_contact_id"]
+        if contact_id is None:
+            return None
+        return get_contact_by_id(contact_id)
+
+    def select_contact(contact_id):
+        state["selected_contact_id"] = contact_id
+        render_table()
+        render_detail()
+        page.update()
+
+    def render_detail():
+        contact = selected_contact()
+        if not contact:
+            detail_name.value = "Select a contact"
+            detail_phone.value = "-"
+            detail_email.value = "-"
+            detail_address.value = "-"
+            detail_group.value = NO_GROUP_LABEL
+            selected_count_text.value = "None"
+            return
+
+        detail_name.value = contact["name"]
+        detail_phone.value = contact["phone"]
+        detail_email.value = _safe_text(contact["email"])
+        detail_address.value = _safe_text(contact["address"])
+        detail_group.value = _contact_group(contact)
+        selected_count_text.value = contact["name"]
+
+    def make_table_text(value, *, color=TEXT, weight=None, max_lines=1):
+        return ft.Text(
+            _safe_text(value),
+            size=13,
+            color=color,
+            weight=weight,
+            max_lines=max_lines,
+            overflow=ft.TextOverflow.ELLIPSIS if max_lines is not None else None,
+        )
+
+    def make_table_cell(content, expand, *, bgcolor=None, on_click=None):
+        return ft.Container(
+            content=content,
+            expand=expand,
+            padding=ft.padding.symmetric(horizontal=16, vertical=14),
+            bgcolor=bgcolor,
+            on_click=on_click,
+        )
+
+    def render_table():
+        column_specs = [
+            ("Name", 20),
+            ("Phone", 14),
+            ("Email", 24),
+            ("Address", 22),
+            ("Group", 24),
+        ]
+
+        table_rows = [
+            ft.Container(
+                content=ft.Row(
+                    [
+                        make_table_cell(
+                            make_table_text(
+                                label,
+                                weight=ft.FontWeight.W_700,
+                                color=TEXT,
+                            ),
+                            expand,
+                        )
+                        for label, expand in column_specs
+                    ],
+                    spacing=0,
+                    vertical_alignment=ft.CrossAxisAlignment.STRETCH,
+                ),
+                bgcolor=ft.Colors.GREY_100,
+                border=ft.border.only(bottom=ft.BorderSide(1, BORDER)),
+                height=48,
+            )
+        ]
+
+        for contact in state["contacts"]:
+            contact_id = contact["id"]
+            row_bgcolor = TEAL_LIGHT if state["selected_contact_id"] == contact_id else SURFACE
+            row_border_color = "#A7F3D0" if state["selected_contact_id"] == contact_id else BORDER
+
+            table_rows.append(
+                ft.Container(
+                    content=ft.Row(
+                        [
+                            make_table_cell(
+                                make_table_text(contact["name"]),
+                                20,
+                                bgcolor=row_bgcolor,
+                                on_click=lambda _e, cid=contact_id: select_contact(cid),
+                            ),
+                            make_table_cell(
+                                make_table_text(contact["phone"]),
+                                14,
+                                bgcolor=row_bgcolor,
+                                on_click=lambda _e, cid=contact_id: select_contact(cid),
+                            ),
+                            make_table_cell(
+                                make_table_text(contact["email"]),
+                                24,
+                                bgcolor=row_bgcolor,
+                                on_click=lambda _e, cid=contact_id: select_contact(cid),
+                            ),
+                            make_table_cell(
+                                make_table_text(contact["address"]),
+                                22,
+                                bgcolor=row_bgcolor,
+                                on_click=lambda _e, cid=contact_id: select_contact(cid),
+                            ),
+                            make_table_cell(
+                                make_table_text(_contact_group(contact), max_lines=None),
+                                24,
+                                bgcolor=row_bgcolor,
+                                on_click=lambda _e, cid=contact_id: select_contact(cid),
+                            ),
+                        ],
+                        spacing=0,
+                        vertical_alignment=ft.CrossAxisAlignment.STRETCH,
+                    ),
+                    border=ft.border.only(bottom=ft.BorderSide(1, row_border_color)),
+                    bgcolor=row_bgcolor,
+                    height=48,
+                    ink=True,
+                    on_click=lambda _e, cid=contact_id: select_contact(cid),
+                )
+            )
+
+        if len(table_rows) == 1:
+            table_rows.append(
+                ft.Container(
+                    content=ft.Column(
+                        [
+                            ft.Icon(ft.Icons.CONTACT_PHONE_OUTLINED, size=48, color=MUTED),
+                            ft.Text("No contacts found", size=18, weight=ft.FontWeight.W_600),
+                            ft.Text(
+                                "Add a contact or clear the search field.",
+                                size=13,
+                                color=MUTED,
+                            ),
+                        ],
+                        horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                        alignment=ft.MainAxisAlignment.CENTER,
+                        spacing=8,
+                    ),
+                    height=280,
+                    alignment=CENTER,
+                    bgcolor=SURFACE,
+                )
+            )
+
+        table_area.controls = [
+            ft.Container(
+                content=ft.Column(table_rows, spacing=0, expand=True),
+                border=ft.border.all(1, BORDER),
+                border_radius=8,
+                bgcolor=SURFACE,
+                clip_behavior=ft.ClipBehavior.HARD_EDGE,
+                expand=True,
+            )
+        ]
+
+        # Update table panel column
+        table_panel_column = table_panel.content
+        if state["filter_group_id"] is not None:
+            # Show filter indicator
+            table_panel_column.controls[1] = ft.Container(
+                content=ft.Row(
+                    [
+                        ft.Icon(ft.Icons.INFO, size=16, color=BLUE),
+                        ft.Text(
+                            "Viewing group: ",
+                            size=13,
+                            color=BLUE,
+                        ),
+                        ft.Text(
+                            state.get("filter_group_name", ""),
+                            size=13,
+                            color=BLUE,
+                            weight=ft.FontWeight.W_600,
+                        ),
+                        ft.Container(expand=True),
+                        ft.TextButton(
+                            "View All",
+                            icon=ft.Icons.CLOSE,
+                            on_click=view_all_contacts,
+                        ),
+                    ],
+                    spacing=8,
+                ),
+                padding=ft.padding.symmetric(horizontal=12, vertical=8),
+                bgcolor=ft.Colors.with_opacity(0.1, BLUE),
+                border_radius=6,
+            )
+        else:
+            # Hide filter indicator by replacing with empty container
+            table_panel_column.controls[1] = ft.Container(height=0)
+
+    def refresh_contacts():
+        keyword = search_field.value.strip()
+        state["search"] = keyword
+        try:
+            state["contacts"] = search_contacts(keyword) if keyword else get_all_contacts()
+        except ValueError:
+            state["contacts"] = []
+        except Exception as exc:
+            _show_error(page, f"Could not load contacts.\n{exc}")
+            state["contacts"] = []
+
+        # Apply group filter if set
+        if state["filter_group_id"] is not None:
+            state["contacts"] = [c for c in state["contacts"] if c.get("group_id") == state["filter_group_id"]]
+
+        contact_ids = {contact["id"] for contact in state["contacts"]}
+        if state["selected_contact_id"] not in contact_ids:
+            state["selected_contact_id"] = state["contacts"][0]["id"] if state["contacts"] else None
+
+        contact_count_text.value = str(len(state["contacts"]))
+        group_count_text.value = str(len(get_groups()))
+        render_table()
+        render_detail()
+        page.update()
+
+    def reset_search(_e=None):
+        search_field.value = ""
+        state["filter_group_id"] = None
+        state["filter_group_name"] = None
+        refresh_contacts()
+
+    def view_all_contacts(_e=None):
+        """Clear filter and view all contacts."""
+        state["filter_group_id"] = None
+        state["filter_group_name"] = None
+        search_field.value = ""
+        refresh_contacts()
+
+    def open_contact_form(contact=None):
+        is_edit = contact is not None
+        name_field = _field(
+            "Name",
+            ft.Icons.PERSON_OUTLINE,
+            value=contact["name"] if is_edit else "",
+            autofocus=True,
+        )
+        phone_field = _field(
+            "Phone",
+            ft.Icons.PHONE_OUTLINED,
+            value=contact["phone"] if is_edit else "",
+            keyboard_type=ft.KeyboardType.PHONE,
+            max_length=11,
+        )
+        email_field = _field(
+            "Email",
+            ft.Icons.MAIL_OUTLINE,
+            value=contact["email"] if is_edit else "",
+            keyboard_type=ft.KeyboardType.EMAIL,
+        )
+        address_field = _field(
+            "Address",
+            ft.Icons.HOME_OUTLINED,
+            value=contact["address"] if is_edit else "",
+        )
+        group_field = _dropdown(
+            "Group",
+            _group_value(contact["group_id"]) if is_edit else "",
+            _make_group_options(include_no_group=True),
+        )
+        error_text = ft.Text("", color=RED, visible=False, size=13)
+
+        def close_dialog(_e=None):
+            page.pop_dialog()
+
+        def save_contact(_e=None):
+            try:
+                group_id = _parse_group_id(group_field.value)
+                if is_edit:
+                    edit_contact(
+                        contact["id"],
+                        name_field.value,
+                        phone_field.value,
+                        email_field.value,
+                        address_field.value,
+                        group_id,
+                    )
+                    message = "Contact updated successfully."
+                else:
+                    add_contact(
+                        name_field.value,
+                        phone_field.value,
+                        email_field.value,
+                        address_field.value,
+                        group_id,
+                    )
+                    message = "Contact added successfully."
+
+                page.pop_dialog()
+                refresh_contacts()
+                _show_snack(page, message, GREEN)
+            except ValueError as exc:
+                error_text.value = str(exc)
+                error_text.visible = True
+                dialog.update()
+            except Exception as exc:
+                error_text.value = f"Could not save contact. {exc}"
+                error_text.visible = True
+                dialog.update()
+
+        dialog = ft.AlertDialog(
+            modal=True,
+            title=_dialog_title(
+                ft.Icons.EDIT_OUTLINED if is_edit else ft.Icons.PERSON_ADD_ALT_1,
+                "Edit Contact" if is_edit else "Add Contact",
+            ),
+            content=ft.Container(
+                width=520,
+                content=ft.Column(
+                    [
+                        ft.ResponsiveRow(
+                            [
+                                ft.Container(name_field, col={"sm": 12, "md": 6}),
+                                ft.Container(phone_field, col={"sm": 12, "md": 6}),
+                                ft.Container(email_field, col={"sm": 12, "md": 6}),
+                                ft.Container(group_field, col={"sm": 12, "md": 6}),
+                            ],
+                            spacing=10,
+                            run_spacing=10,
+                        ),
+                        address_field,
+                        error_text,
+                    ],
+                    tight=True,
+                    spacing=12,
+                ),
+            ),
+            actions=[
+                ft.TextButton("Cancel", on_click=close_dialog),
+                ft.FilledButton(
+                    "Save",
+                    icon=ft.Icons.SAVE_OUTLINED,
+                    style=_button_style(TEAL, ft.Colors.WHITE),
+                    on_click=save_contact,
+                ),
+            ],
+            actions_alignment=ft.MainAxisAlignment.END,
+        )
+        page.show_dialog(dialog)
+
+    def open_add_contact(_e=None):
+        open_contact_form()
+
+    def open_edit_contact(_e=None):
+        contact = selected_contact()
+        if not contact:
+            _show_snack(page, "Select a contact first.", AMBER)
+            return
+        open_contact_form(contact)
+
+    def delete_selected_contact(_e=None):
+        contact = selected_contact()
+        if not contact:
+            _show_snack(page, "Select a contact first.", AMBER)
+            return
+
+        def close_dialog(_e=None):
+            page.pop_dialog()
+
+        def do_delete(_e=None):
+            try:
+                remove_contact(contact["id"])
+                page.pop_dialog()
+                refresh_contacts()
+                _show_snack(page, "Contact deleted successfully.", GREEN)
+            except Exception as exc:
+                page.pop_dialog()
+                _show_error(page, f"Could not delete contact.\n{exc}")
+
+        page.show_dialog(
+            ft.AlertDialog(
+                modal=True,
+                title=_dialog_title(ft.Icons.DELETE_OUTLINE, "Delete Contact"),
+                content=ft.Text(
+                    f"Delete '{contact['name']}' from the phone book?",
+                    color=TEXT,
+                ),
+                actions=[
+                    ft.TextButton("Cancel", on_click=close_dialog),
+                    ft.FilledButton(
+                        "Delete",
+                        icon=ft.Icons.DELETE_OUTLINE,
+                        style=_button_style(RED, ft.Colors.WHITE),
+                        on_click=do_delete,
+                    ),
+                ],
+                actions_alignment=ft.MainAxisAlignment.END,
+            )
+        )
+
+    def open_group_manager(_e=None):
+        selected_group = {"id": None}
+        group_name_field = _field("Group name", ft.Icons.GROUP_OUTLINED)
+        group_list = ft.ListView(expand=True, spacing=8, padding=0)
+        assign_contact_field = _dropdown(
+            "Contact",
+            None,
+            _make_contact_options(),
+            icon=ft.Icons.PERSON_OUTLINE,
+        )
+        assign_group_field = _dropdown(
+            "Group",
+            "",
+            _make_group_options(include_no_group=True),
+        )
+        error_text = ft.Text("", color=RED, size=13, visible=False)
+
+        def set_error(message):
+            error_text.value = message
+            error_text.visible = bool(message)
+            dialog.update()
+
+        def render_groups():
+            contacts = get_all_contacts()
+            counts = {}
+            for item in contacts:
+                group_id = item.get("group_id")
+                counts[group_id] = counts.get(group_id, 0) + 1
+
+            controls = []
+            for group in get_groups():
+                is_selected = selected_group["id"] == group["id"]
+
+                def choose_group(_e, group_id=group["id"], group_name=group["name"]):
+                    selected_group["id"] = group_id
+                    group_name_field.value = group_name
+                    render_groups()
+                    dialog.update()
+
+                def view_group_contacts(_e, group_id=group["id"]):
+                    page.pop_dialog()
+                    # Filter contacts by group
+                    filtered = [c for c in get_all_contacts() if c.get("group_id") == group_id]
+                    state["contacts"] = filtered
+                    if filtered:
+                        state["selected_contact_id"] = filtered[0]["id"]
+                    else:
+                        state["selected_contact_id"] = None
+                    contact_count_text.value = str(len(filtered))
+                    render_table()
+                    render_detail()
+                    page.update()
+
+                controls.append(
+                    ft.Container(
+                        content=ft.Row(
+                            [
+                                ft.Icon(ft.Icons.GROUP_OUTLINED, color=TEAL if is_selected else MUTED),
+                                ft.Column(
+                                    [
+                                        ft.Text(group["name"], weight=ft.FontWeight.W_600, color=TEXT),
+                                        ft.Text(
+                                            f"{counts.get(group['id'], 0)} contact(s)",
+                                            size=12,
+                                            color=MUTED,
+                                        ),
+                                    ],
+                                    spacing=0,
+                                    expand=True,
+                                ),
+                            ],
+                            spacing=10,
+                        ),
+                        padding=12,
+                        border_radius=8,
+                        bgcolor=TEAL_LIGHT if is_selected else SURFACE_MUTED,
+                        border=ft.border.all(1, TEAL if is_selected else BORDER),
+                        on_click=choose_group,
+                        data=group["id"],
+                    )
+                )
+
+            if not controls:
+                controls.append(
+                    ft.Container(
+                        content=ft.Text("No groups yet.", color=MUTED),
+                        alignment=CENTER,
+                        height=140,
+                    )
+                )
+            group_list.controls = controls
+
+        def refresh_group_dialog(update_dialog=True):
+            assign_contact_field.options = _make_contact_options()
+            if assign_contact_field.options and not assign_contact_field.value:
+                assign_contact_field.value = assign_contact_field.options[0].key
+            elif not assign_contact_field.options:
+                assign_contact_field.value = None
+
+            assign_group_field.options = _make_group_options(include_no_group=True)
+            if assign_group_field.value not in [option.key for option in assign_group_field.options]:
+                assign_group_field.value = ""
+
+            render_groups()
+            refresh_contacts()
+            if update_dialog:
+                dialog.update()
+
+        def create_new_group(_e=None):
+            try:
+                create_group(group_name_field.value)
+                group_name_field.value = ""
+                selected_group["id"] = None
+                set_error("")
+                refresh_group_dialog()
+                _show_snack(page, "Group created successfully.", GREEN)
+            except ValueError as exc:
+                set_error(str(exc))
+            except Exception as exc:
+                set_error(f"Could not create group. {exc}")
+
+        def rename_selected_group(_e=None):
+            if not selected_group["id"]:
+                set_error("Select a group to rename.")
+                return
+            try:
+                rename_group(selected_group["id"], group_name_field.value)
+                set_error("")
+                refresh_group_dialog()
+                _show_snack(page, "Group renamed successfully.", GREEN)
+            except ValueError as exc:
+                set_error(str(exc))
+            except Exception as exc:
+                set_error(f"Could not rename group. {exc}")
+
+        def delete_selected_group(_e=None):
+            if not selected_group["id"]:
+                set_error("Select a group to delete.")
+                return
+            try:
+                delete_group(selected_group["id"])
+                selected_group["id"] = None
+                group_name_field.value = ""
+                set_error("")
+                refresh_group_dialog()
+                _show_snack(page, "Group deleted successfully.", GREEN)
+            except ValueError as exc:
+                set_error(str(exc))
+            except Exception as exc:
+                set_error(f"Could not delete group. {exc}")
+
+        def assign_group(_e=None):
+            if not assign_contact_field.value:
+                set_error("Create or select a contact first.")
+                return
+            try:
+                assign_contact_to_group(
+                    int(assign_contact_field.value),
+                    _parse_group_id(assign_group_field.value),
+                )
+                set_error("")
+                refresh_group_dialog()
+                _show_snack(page, "Contact group updated successfully.", GREEN)
+            except ValueError as exc:
+                set_error(str(exc))
+            except Exception as exc:
+                set_error(f"Could not assign contact. {exc}")
+
+        dialog = ft.AlertDialog(
+            modal=True,
+            title=_dialog_title(ft.Icons.GROUP_OUTLINED, "Manage Groups"),
+            content=ft.Container(
+                width=820,
+                height=500,
+                content=ft.Row(
+                    [
+                        ft.Container(
+                            content=ft.Column(
+                                [
+                                    ft.Text("Groups", size=14, weight=ft.FontWeight.W_700, color=TEXT),
+                                    group_list,
+                                    group_name_field,
+                                    ft.Row(
+                                        [
+                                            ft.FilledButton(
+                                                "Create",
+                                                icon=ft.Icons.ADD,
+                                                style=_button_style(TEAL, ft.Colors.WHITE),
+                                                on_click=create_new_group,
+                                            ),
+                                            ft.OutlinedButton(
+                                                "Rename",
+                                                icon=ft.Icons.EDIT_OUTLINED,
+                                                on_click=rename_selected_group,
+                                            ),
+                                            ft.IconButton(
+                                                icon=ft.Icons.DELETE_OUTLINE,
+                                                icon_color=RED,
+                                                tooltip="Delete group",
+                                                on_click=delete_selected_group,
+                                            ),
+                                        ],
+                                        spacing=8,
+                                        wrap=True,
+                                    ),
+                                ],
+                                spacing=12,
+                                expand=True,
+                            ),
+                            expand=1,
+                        ),
+                        ft.VerticalDivider(width=1, color=BORDER),
+                        ft.Container(
+                            content=ft.Column(
+                                [
+                                    ft.Text(
+                                        "Assign Contact",
+                                        size=14,
+                                        weight=ft.FontWeight.W_700,
+                                        color=TEXT,
+                                    ),
+                                    assign_contact_field,
+                                    assign_group_field,
+                                    ft.FilledButton(
+                                        "Apply Group",
+                                        icon=ft.Icons.CHECK_CIRCLE_OUTLINE,
+                                        style=_button_style(BLUE, ft.Colors.WHITE),
+                                        on_click=assign_group,
+                                    ),
+                                    ft.Divider(color=BORDER),
+                                    ft.Text(
+                                        "Double-click a group to view its contacts. Deleting a group keeps its contacts and clears their group.",
+                                        size=12,
+                                        color=MUTED,
+                                    ),
+                                    error_text,
+                                ],
+                                spacing=12,
+                            ),
+                            expand=1,
+                        ),
+                    ],
+                    spacing=18,
+                    vertical_alignment=ft.CrossAxisAlignment.START,
+                ),
+            ),
+            actions=[
+                ft.TextButton("Close", on_click=lambda _e: page.pop_dialog()),
+            ],
+        )
+
+        refresh_group_dialog(update_dialog=False)
+        page.show_dialog(dialog)
+
+    def open_group_list(_e=None):
+        """Show a simple list of groups - double-click to view contacts in that group."""
+        group_list = ft.ListView(expand=True, spacing=8, padding=0)
+
+        def render_groups_list():
+            contacts = get_all_contacts()
+            counts = {}
+            for item in contacts:
+                group_id = item.get("group_id")
+                counts[group_id] = counts.get(group_id, 0) + 1
+
+            controls = []
+            for group in get_groups():
+                def on_double_click(_e, group_id=group["id"], group_name=group["name"]):
+                    page.pop_dialog()
+                    # Filter contacts by group
+                    filtered = [c for c in get_all_contacts() if c.get("group_id") == group_id]
+                    state["contacts"] = filtered
+                    state["filter_group_id"] = group_id
+                    state["filter_group_name"] = group_name
+                    if filtered:
+                        state["selected_contact_id"] = filtered[0]["id"]
+                    else:
+                        state["selected_contact_id"] = None
+                    contact_count_text.value = str(len(filtered))
+                    render_table()
+                    render_detail()
+                    page.update()
+
+                controls.append(
+                    ft.Container(
+                        content=ft.Row(
+                            [
+                                ft.Icon(ft.Icons.GROUP_OUTLINED, color=TEAL, size=24),
+                                ft.Column(
+                                    [
+                                        ft.Text(group["name"], weight=ft.FontWeight.W_600, color=TEXT, size=15),
+                                        ft.Text(
+                                            f"{counts.get(group['id'], 0)} contact(s)",
+                                            size=13,
+                                            color=MUTED,
+                                        ),
+                                    ],
+                                    spacing=0,
+                                    expand=True,
+                                ),
+                            ],
+                            spacing=12,
+                        ),
+                        padding=ft.padding.symmetric(horizontal=16, vertical=12),
+                        border_radius=8,
+                        bgcolor=SURFACE_MUTED,
+                        border=ft.border.all(1, BORDER),
+                        on_click=on_double_click,
+                        ink=True,
+                    )
+                )
+
+            if not controls:
+                controls.append(
+                    ft.Container(
+                        content=ft.Column(
+                            [
+                                ft.Icon(ft.Icons.GROUP_OUTLINED, size=48, color=MUTED),
+                                ft.Text("No groups yet", size=18, weight=ft.FontWeight.W_600),
+                                ft.Text(
+                                    "Create a group from 'Manage Groups'",
+                                    size=13,
+                                    color=MUTED,
+                                ),
+                            ],
+                            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                            alignment=ft.MainAxisAlignment.CENTER,
+                            spacing=8,
+                        ),
+                        height=280,
+                        alignment=CENTER,
+                        bgcolor=SURFACE,
+                    )
+                )
+            group_list.controls = controls
+
+        render_groups_list()
+
+        dialog = ft.AlertDialog(
+            modal=True,
+            title=_dialog_title(ft.Icons.GROUP_OUTLINED, "Select a Group"),
+            content=ft.Container(
+                width=450,
+                height=400,
+                content=group_list,
+            ),
+            actions=[
+                ft.TextButton("Close", on_click=lambda _e: page.pop_dialog()),
+            ],
+        )
+        page.show_dialog(dialog)
+
+    header = ft.Container(
+        content=ft.Row(
+            [
+                ft.Row(
+                    [
+                        ft.Container(
+                            ft.Icon(ft.Icons.CONTACT_PHONE_OUTLINED, size=26, color=ft.Colors.WHITE),
+                            width=48,
+                            height=48,
+                            border_radius=8,
+                            bgcolor=TEAL,
+                            alignment=CENTER,
+                        ),
+                        ft.Column(
+                            [
+                                ft.Text(
+                                    "Phone Book Management System",
+                                    size=22,
+                                    weight=ft.FontWeight.W_700,
+                                    color=TEXT,
+                                ),
+                                ft.Text(
+                                    "Manage contacts, phone numbers, and groups",
+                                    size=13,
+                                    color=MUTED,
+                                ),
+                            ],
+                            spacing=0,
+                            tight=True,
+                        ),
+                    ],
+                    spacing=12,
+                ),
+                ft.Row(
+                    [
+                        ft.FilledButton(
+                            "Add Contact",
+                            icon=ft.Icons.ADD,
+                            style=_button_style(TEAL, ft.Colors.WHITE),
+                            on_click=open_add_contact,
+                        ),
+                        ft.OutlinedButton(
+                            "Manage Groups",
+                            icon=ft.Icons.GROUP_OUTLINED,
+                            on_click=open_group_manager,
+                        ),
+                    ],
+                    spacing=8,
+                ),
+            ],
+            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+        ),
+        padding=ft.padding.symmetric(horizontal=24, vertical=18),
+        bgcolor=SURFACE,
+        border=ft.border.only(bottom=ft.BorderSide(1, BORDER)),
+    )
+
+    metrics = ft.Row(
+        [
+            _metric_card("Contacts shown", contact_count_text, ft.Icons.PERSON_OUTLINE, TEAL),
+            _metric_card("Groups", group_count_text, ft.Icons.GROUP_OUTLINED, BLUE, on_click=open_group_list),
+            _metric_card("Selected", selected_count_text, ft.Icons.CHECK_CIRCLE_OUTLINE, GREEN),
+        ],
+        spacing=12,
+    )
+
+    table_panel = ft.Container(
+        content=ft.Column(
+            [
+                ft.Row(
+                    [
+                        ft.Text("Contacts", size=16, weight=ft.FontWeight.W_700, color=TEXT),
+                        ft.Row(
+                            [
+                                ft.IconButton(
+                                    icon=ft.Icons.EDIT_OUTLINED,
+                                    tooltip="Edit selected contact",
+                                    on_click=open_edit_contact,
+                                ),
+                                ft.IconButton(
+                                    icon=ft.Icons.DELETE_OUTLINE,
+                                    icon_color=RED,
+                                    tooltip="Delete selected contact",
+                                    on_click=delete_selected_contact,
+                                ),
+                                ft.IconButton(
+                                    icon=ft.Icons.REFRESH,
+                                    tooltip="Clear search and refresh",
+                                    on_click=reset_search,
+                                ),
+                            ],
+                            spacing=4,
+                        ),
+                    ],
+                    alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                ),
+                ft.Container(
+                    content=ft.Row(
+                        [
+                            ft.Icon(ft.Icons.INFO, size=16, color=BLUE),
+                            ft.Text(
+                                "Viewing group: ",
+                                size=13,
+                                color=BLUE,
+                            ),
+                            ft.Text(
+                                state.get("filter_group_name", ""),
+                                size=13,
+                                color=BLUE,
+                                weight=ft.FontWeight.W_600,
+                            ),
+                            ft.Container(expand=True),
+                            ft.TextButton(
+                                "View All",
+                                icon=ft.Icons.CLOSE,
+                                on_click=view_all_contacts,
+                            ),
+                        ],
+                        spacing=8,
+                    ),
+                    padding=ft.padding.symmetric(horizontal=12, vertical=8),
+                    bgcolor=ft.Colors.with_opacity(0.1, BLUE),
+                    border_radius=6,
+                    visible=state["filter_group_id"] is not None,
+                ),
+                ft.Row([search_field], spacing=0),
+                ft.Container(
+                    content=table_area,
+                    expand=True,
+                    border=ft.border.all(1, BORDER),
+                    border_radius=8,
+                    clip_behavior=ft.ClipBehavior.HARD_EDGE,
+                    bgcolor=SURFACE,
+                ),
+            ],
+            spacing=12,
+            expand=True,
+            horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+        ),
+        padding=18,
+        bgcolor=SURFACE,
+        border=ft.border.all(1, BORDER),
+        border_radius=8,
+        expand=3,
+    )
+
+    detail_panel = ft.Container(
+        content=ft.Column(
+            [
+                ft.Text("Contact Details", size=16, weight=ft.FontWeight.W_700, color=TEXT),
+                ft.Divider(color=BORDER),
+                detail_name,
+                ft.Column(
+                    [
+                        ft.Row([ft.Icon(ft.Icons.PHONE_OUTLINED, size=18, color=TEAL), detail_phone]),
+                        ft.Row([ft.Icon(ft.Icons.MAIL_OUTLINE, size=18, color=BLUE), detail_email]),
+                        ft.Row([ft.Icon(ft.Icons.HOME_OUTLINED, size=18, color=AMBER), detail_address]),
+                        ft.Row([ft.Icon(ft.Icons.GROUP_OUTLINED, size=18, color=GREEN), detail_group]),
+                    ],
+                    spacing=10,
+                ),
+                ft.Container(expand=True),
+                ft.FilledButton(
+                    "Edit Contact",
+                    icon=ft.Icons.EDIT_OUTLINED,
+                    style=_button_style(TEAL, ft.Colors.WHITE),
+                    on_click=open_edit_contact,
+                    width=220,
+                ),
+                ft.OutlinedButton(
+                    "Delete Contact",
+                    icon=ft.Icons.DELETE_OUTLINE,
+                    on_click=delete_selected_contact,
+                    width=220,
+                ),
+            ],
+            spacing=14,
+            expand=True,
+        ),
+        padding=18,
+        bgcolor=SURFACE,
+        border=ft.border.all(1, BORDER),
+        border_radius=8,
+        expand=1,
+    )
+
+    page.add(
+        ft.Column(
+            [
+                header,
+                ft.Container(
+                    content=ft.Column(
+                        [
+                            metrics,
+                            ft.Row(
+                                [table_panel, detail_panel],
+                                spacing=12,
+                                expand=True,
+                                vertical_alignment=ft.CrossAxisAlignment.STRETCH,
+                            ),
+                        ],
+                        spacing=12,
+                        expand=True,
+                    ),
+                    padding=18,
+                    expand=True,
+                ),
+            ],
+            spacing=0,
+            expand=True,
+        )
+    )
+
+    refresh_contacts()
 
 
 if __name__ == "__main__":

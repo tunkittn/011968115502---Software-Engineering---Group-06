@@ -1,6 +1,6 @@
 # Phone Book Management System
 
-A desktop phone book application built with Python, Tkinter, and SQLite.
+A desktop phone book application built with Python, Flet, and SQLite.
 
 ## Features
 
@@ -13,9 +13,17 @@ A desktop phone book application built with Python, Tkinter, and SQLite.
 ## Requirements
 
 - Python 3.10 or later.
-- Tkinter, which is included with most standard Python installations.
+- Flet, installed from `requirements.txt`.
 
 ## How to Run
+
+Install dependencies:
+
+```bash
+python -m pip install -r requirements.txt
+```
+
+Start the app:
 
 ```bash
 python main.py
