@@ -4,7 +4,7 @@ import re
 
 import database
 
-PHONE_PATTERN = re.compile(r"^\d{10,11}$")
+PHONE_PATTERN = re.compile(r"^\d{1,11}$")
 EMAIL_PATTERN = re.compile(r"^[\w\.-]+@[\w\.-]+\.\w+$")
 
 
@@ -15,7 +15,7 @@ def validate_contact(name, phone, email="", exclude_contact_id=None):
     if not phone or not phone.strip():
         return False, "Phone number must not be empty."
     if not PHONE_PATTERN.match(phone.strip()):
-        return False, "Phone number must be 10-11 digits."
+        return False, "Phone number must be 1-11 digits."
     if email and not EMAIL_PATTERN.match(email.strip()):
         return False, "Invalid email format."
     if database.phone_exists(phone.strip(), exclude_contact_id=exclude_contact_id):

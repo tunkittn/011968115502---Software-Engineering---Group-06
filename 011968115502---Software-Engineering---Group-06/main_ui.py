@@ -50,7 +50,7 @@ def _parse_group_id(value):
 
 
 def _contact_group(contact):
-    return contact.get("group_name") or NO_GROUP_LABEL
+    return ", ".join([g["name"] for g in contact.get("groups", [])]) or "-"
 
 
 def _dialog_title(icon, title):
@@ -266,7 +266,7 @@ def _build_app(page: ft.Page):
         expand=True,
     )
     detail_group = ft.Text(
-        NO_GROUP_LABEL,
+        "-",
         size=14,
         color=MUTED,
         expand=True,
@@ -298,7 +298,7 @@ def _build_app(page: ft.Page):
             detail_phone.value = "-"
             detail_email.value = "-"
             detail_address.value = "-"
-            detail_group.value = NO_GROUP_LABEL
+            detail_group.value = "-"
             selected_count_text.value = "None"
             return
 
@@ -327,6 +327,27 @@ def _build_app(page: ft.Page):
             bgcolor=bgcolor,
             on_click=on_click,
         )
+
+    # Vietnamese alphabet order including accented characters
+    VIETNAMESE_ALPHABET = "AĂÂBCDĐEÊFGHIJKLMNOÔƠPQRSTUƯVWXYZ#"
+
+    def get_sort_key(contact):
+        """Get the first letter of contact name for sorting using Vietnamese alphabet order."""
+        if not contact["name"]:
+            return (999, "")
+        first_char = contact["name"].upper()[0]
+        # Get the position in Vietnamese alphabet, or put at end if not found
+        position = VIETNAMESE_ALPHABET.find(first_char)
+        if position == -1:
+            position = 999  # Put unknown characters at the end
+        return (position, contact["name"].upper())
+
+    def get_display_letter(char):
+        """Get the display letter for section headers."""
+        upper_char = char.upper()
+        if upper_char in VIETNAMESE_ALPHABET:
+            return upper_char
+        return "#"
 
     def render_table():
         column_specs = [
@@ -360,7 +381,31 @@ def _build_app(page: ft.Page):
             )
         ]
 
-        for contact in state["contacts"]:
+        # Sort contacts using Vietnamese alphabet order
+        sorted_contacts = sorted(state["contacts"], key=get_sort_key)
+        
+        # Group contacts by first letter
+        current_letter = None
+        for contact in sorted_contacts:
+            contact_letter = get_display_letter(contact["name"][0] if contact["name"] else "")
+            
+            # Add section header when letter changes
+            if contact_letter != current_letter:
+                current_letter = contact_letter
+                table_rows.append(
+                    ft.Container(
+                        content=ft.Text(
+                            current_letter,
+                            size=14,
+                            weight=ft.FontWeight.W_700,
+                            color=TEAL,
+                        ),
+                        bgcolor="#F0FDFB",
+                        padding=ft.padding.symmetric(horizontal=16, vertical=10),
+                        border=ft.border.only(top=ft.BorderSide(1, BORDER)),
+                    )
+                )
+            
             contact_id = contact["id"]
             row_bgcolor = TEAL_LIGHT if state["selected_contact_id"] == contact_id else SURFACE
             row_border_color = "#A7F3D0" if state["selected_contact_id"] == contact_id else BORDER
@@ -382,13 +427,13 @@ def _build_app(page: ft.Page):
                                 on_click=lambda _e, cid=contact_id: select_contact(cid),
                             ),
                             make_table_cell(
-                                make_table_text(contact["email"]),
+                                make_table_text(_safe_text(contact["email"])),
                                 24,
                                 bgcolor=row_bgcolor,
                                 on_click=lambda _e, cid=contact_id: select_contact(cid),
                             ),
                             make_table_cell(
-                                make_table_text(contact["address"]),
+                                make_table_text(_safe_text(contact["address"])),
                                 22,
                                 bgcolor=row_bgcolor,
                                 on_click=lambda _e, cid=contact_id: select_contact(cid),
@@ -684,12 +729,8 @@ def _build_app(page: ft.Page):
         selected_group = {"id": None}
         group_name_field = _field("Group name", ft.Icons.GROUP_OUTLINED)
         group_list = ft.ListView(expand=True, spacing=8, padding=0)
-        assign_contact_field = _dropdown(
-            "Contact",
-            None,
-            _make_contact_options(),
-            icon=ft.Icons.PERSON_OUTLINE,
-        )
+        selected_contacts = {}  # Dictionary to track checkbox states: contact_id -> checked
+        contact_list = ft.ListView(expand=True, spacing=0, padding=0)
         assign_group_field = _dropdown(
             "Group",
             "",
@@ -706,8 +747,9 @@ def _build_app(page: ft.Page):
             contacts = get_all_contacts()
             counts = {}
             for item in contacts:
-                group_id = item.get("group_id")
-                counts[group_id] = counts.get(group_id, 0) + 1
+                for group in item.get("groups", []):
+                    group_id = group["id"]
+                    counts[group_id] = counts.get(group_id, 0) + 1
 
             controls = []
             for group in get_groups():
@@ -721,8 +763,8 @@ def _build_app(page: ft.Page):
 
                 def view_group_contacts(_e, group_id=group["id"]):
                     page.pop_dialog()
-                    # Filter contacts by group
-                    filtered = [c for c in get_all_contacts() if c.get("group_id") == group_id]
+                    # Filter contacts by group - check if contact has this group in its groups list
+                    filtered = [c for c in get_all_contacts() if any(g["id"] == group_id for g in c.get("groups", []))]
                     state["contacts"] = filtered
                     if filtered:
                         state["selected_contact_id"] = filtered[0]["id"]
@@ -773,11 +815,22 @@ def _build_app(page: ft.Page):
             group_list.controls = controls
 
         def refresh_group_dialog(update_dialog=True):
-            assign_contact_field.options = _make_contact_options()
-            if assign_contact_field.options and not assign_contact_field.value:
-                assign_contact_field.value = assign_contact_field.options[0].key
-            elif not assign_contact_field.options:
-                assign_contact_field.value = None
+            # Refresh contact list with checkboxes
+            contact_list.controls = []
+            for contact in get_all_contacts():
+                contact_id = contact["id"]
+                is_checked = selected_contacts.get(contact_id, False)
+                
+                def toggle_contact(e, cid=contact_id):
+                    selected_contacts[cid] = e.control.value
+                    dialog.update()
+                
+                checkbox = ft.Checkbox(
+                    label=f"{contact['name']} ({contact['phone']})",
+                    value=is_checked,
+                    on_change=toggle_contact,
+                )
+                contact_list.controls.append(checkbox)
 
             assign_group_field.options = _make_group_options(include_no_group=True)
             if assign_group_field.value not in [option.key for option in assign_group_field.options]:
@@ -832,21 +885,27 @@ def _build_app(page: ft.Page):
                 set_error(f"Could not delete group. {exc}")
 
         def assign_group(_e=None):
-            if not assign_contact_field.value:
-                set_error("Create or select a contact first.")
+            # Get all selected contacts
+            selected_contact_ids = [cid for cid, checked in selected_contacts.items() if checked]
+            
+            if not selected_contact_ids:
+                set_error("Select at least one contact first.")
                 return
             try:
-                assign_contact_to_group(
-                    int(assign_contact_field.value),
-                    _parse_group_id(assign_group_field.value),
-                )
+                # Assign all selected contacts to the group
+                for contact_id in selected_contact_ids:
+                    assign_contact_to_group(
+                        contact_id,
+                        _parse_group_id(assign_group_field.value),
+                    )
                 set_error("")
+                selected_contacts.clear()
                 refresh_group_dialog()
-                _show_snack(page, "Contact group updated successfully.", GREEN)
+                _show_snack(page, f"Successfully assigned {len(selected_contact_ids)} contact(s) to group.", GREEN)
             except ValueError as exc:
                 set_error(str(exc))
             except Exception as exc:
-                set_error(f"Could not assign contact. {exc}")
+                set_error(f"Could not assign contact(s). {exc}")
 
         dialog = ft.AlertDialog(
             modal=True,
@@ -896,12 +955,18 @@ def _build_app(page: ft.Page):
                             content=ft.Column(
                                 [
                                     ft.Text(
-                                        "Assign Contact",
+                                        "Assign Contacts",
                                         size=14,
                                         weight=ft.FontWeight.W_700,
                                         color=TEXT,
                                     ),
-                                    assign_contact_field,
+                                    ft.Text(
+                                        "Select contacts to assign (check boxes below):",
+                                        size=12,
+                                        color=MUTED,
+                                    ),
+                                    contact_list,
+                                    ft.Divider(color=BORDER),
                                     assign_group_field,
                                     ft.FilledButton(
                                         "Apply Group",

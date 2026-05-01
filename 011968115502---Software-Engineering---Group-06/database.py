@@ -35,12 +35,22 @@ def init_database():
                 name TEXT NOT NULL,
                 phone TEXT NOT NULL,
                 email TEXT,
-                address TEXT,
-                group_id INTEGER,
+                address TEXT
+            )
+            """
+        )
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS contact_groups (
+                contact_id INTEGER NOT NULL,
+                group_id INTEGER NOT NULL,
+                PRIMARY KEY (contact_id, group_id),
+                FOREIGN KEY (contact_id)
+                    REFERENCES contacts(id)
+                    ON DELETE CASCADE,
                 FOREIGN KEY (group_id)
                     REFERENCES groups(id)
-                    ON UPDATE CASCADE
-                    ON DELETE SET NULL
+                    ON DELETE CASCADE
             )
             """
         )
@@ -51,7 +61,10 @@ def init_database():
             "CREATE INDEX IF NOT EXISTS idx_contacts_phone ON contacts(phone)"
         )
         cursor.execute(
-            "CREATE INDEX IF NOT EXISTS idx_contacts_group ON contacts(group_id)"
+            "CREATE INDEX IF NOT EXISTS idx_contact_groups_contact ON contact_groups(contact_id)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_contact_groups_group ON contact_groups(group_id)"
         )
         conn.commit()
     finally:
@@ -59,25 +72,12 @@ def init_database():
 
 
 def _contacts_from_rows(rows):
-    return [dict(row) for row in rows]
-
-
-def insert_contact(name, phone, email="", address="", group_id=None):
-    """Insert a contact and return the new contact id."""
-    conn = connect_db()
-    try:
-        cursor = conn.cursor()
-        cursor.execute(
-            """
-            INSERT INTO contacts (name, phone, email, address, group_id)
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            (name, phone, email, address, group_id),
-        )
-        conn.commit()
-        return cursor.lastrowid
-    finally:
-        conn.close()
+    """Convert rows to contact dictionaries with list of groups."""
+    result = []
+    for row in rows:
+        contact_dict = dict(row)
+        result.append(contact_dict)
+    return result
 
 
 def get_all_contacts():
@@ -87,20 +87,60 @@ def get_all_contacts():
         cursor = conn.cursor()
         cursor.execute(
             """
-            SELECT
+            SELECT DISTINCT
                 contacts.id,
                 contacts.name,
                 contacts.phone,
                 contacts.email,
-                contacts.address,
-                contacts.group_id,
-                groups.name AS group_name
+                contacts.address
             FROM contacts
-            LEFT JOIN groups ON contacts.group_id = groups.id
             ORDER BY LOWER(contacts.name), contacts.name
             """
         )
-        return _contacts_from_rows(cursor.fetchall())
+        contacts = _contacts_from_rows(cursor.fetchall())
+        
+        # Fetch groups for each contact
+        for contact in contacts:
+            cursor.execute(
+                """
+                SELECT groups.id, groups.name
+                FROM groups
+                INNER JOIN contact_groups ON groups.id = contact_groups.group_id
+                WHERE contact_groups.contact_id = ?
+                ORDER BY groups.name
+                """,
+                (contact['id'],)
+            )
+            contact['groups'] = [dict(row) for row in cursor.fetchall()]
+        
+        return contacts
+    finally:
+        conn.close()
+
+
+def insert_contact(name, phone, email="", address="", group_id=None):
+    """Insert a contact and return the new contact id."""
+    conn = connect_db()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO contacts (name, phone, email, address)
+            VALUES (?, ?, ?, ?)
+            """,
+            (name, phone, email, address),
+        )
+        contact_id = cursor.lastrowid
+        
+        # If group_id is provided, add to contact_groups
+        if group_id is not None:
+            cursor.execute(
+                "INSERT INTO contact_groups (contact_id, group_id) VALUES (?, ?)",
+                (contact_id, group_id)
+            )
+        
+        conn.commit()
+        return contact_id
     finally:
         conn.close()
 
@@ -113,21 +153,36 @@ def get_contact_by_id(contact_id):
         cursor.execute(
             """
             SELECT
-                contacts.id,
-                contacts.name,
-                contacts.phone,
-                contacts.email,
-                contacts.address,
-                contacts.group_id,
-                groups.name AS group_name
+                id,
+                name,
+                phone,
+                email,
+                address
             FROM contacts
-            LEFT JOIN groups ON contacts.group_id = groups.id
-            WHERE contacts.id = ?
+            WHERE id = ?
             """,
             (contact_id,),
         )
         row = cursor.fetchone()
-        return dict(row) if row else None
+        if not row:
+            return None
+        
+        contact = dict(row)
+        
+        # Fetch groups for this contact
+        cursor.execute(
+            """
+            SELECT groups.id, groups.name
+            FROM groups
+            INNER JOIN contact_groups ON groups.id = contact_groups.group_id
+            WHERE contact_groups.contact_id = ?
+            ORDER BY groups.name
+            """,
+            (contact_id,)
+        )
+        contact['groups'] = [dict(g_row) for g_row in cursor.fetchall()]
+        
+        return contact
     finally:
         conn.close()
 
@@ -140,11 +195,22 @@ def update_contact(contact_id, name, phone, email="", address="", group_id=None)
         cursor.execute(
             """
             UPDATE contacts
-            SET name = ?, phone = ?, email = ?, address = ?, group_id = ?
+            SET name = ?, phone = ?, email = ?, address = ?
             WHERE id = ?
             """,
-            (name, phone, email, address, group_id, contact_id),
+            (name, phone, email, address, contact_id),
         )
+        
+        # If group_id is provided, update the contact_groups relationship
+        if group_id is not None:
+            # Clear existing groups
+            cursor.execute("DELETE FROM contact_groups WHERE contact_id = ?", (contact_id,))
+            # Add new group
+            cursor.execute(
+                "INSERT INTO contact_groups (contact_id, group_id) VALUES (?, ?)",
+                (contact_id, group_id)
+            )
+        
         conn.commit()
         return cursor.rowcount
     finally:
@@ -188,16 +254,15 @@ def search_contacts(keyword):
         pattern = f"%{keyword.strip()}%"
         cursor.execute(
             """
-            SELECT
+            SELECT DISTINCT
                 contacts.id,
                 contacts.name,
                 contacts.phone,
                 contacts.email,
-                contacts.address,
-                contacts.group_id,
-                groups.name AS group_name
+                contacts.address
             FROM contacts
-            LEFT JOIN groups ON contacts.group_id = groups.id
+            LEFT JOIN contact_groups ON contacts.id = contact_groups.contact_id
+            LEFT JOIN groups ON contact_groups.group_id = groups.id
             WHERE contacts.name LIKE ?
                OR contacts.phone LIKE ?
                OR groups.name LIKE ?
@@ -205,7 +270,23 @@ def search_contacts(keyword):
             """,
             (pattern, pattern, pattern),
         )
-        return _contacts_from_rows(cursor.fetchall())
+        contacts = _contacts_from_rows(cursor.fetchall())
+        
+        # Fetch groups for each contact
+        for contact in contacts:
+            cursor.execute(
+                """
+                SELECT groups.id, groups.name
+                FROM groups
+                INNER JOIN contact_groups ON groups.id = contact_groups.group_id
+                WHERE contact_groups.contact_id = ?
+                ORDER BY groups.name
+                """,
+                (contact['id'],)
+            )
+            contact['groups'] = [dict(row) for row in cursor.fetchall()]
+        
+        return contacts
     finally:
         conn.close()
 
@@ -255,14 +336,11 @@ def rename_group(group_id, new_name):
 
 
 def delete_group(group_id):
-    """Delete a group. Contacts in the group are kept with no group."""
+    """Delete a group. Contacts in the group are kept."""
     conn = connect_db()
     try:
         cursor = conn.cursor()
-        cursor.execute(
-            "UPDATE contacts SET group_id = NULL WHERE group_id = ?",
-            (group_id,),
-        )
+        cursor.execute("DELETE FROM contact_groups WHERE group_id = ?", (group_id,))
         cursor.execute("DELETE FROM groups WHERE id = ?", (group_id,))
         conn.commit()
         return cursor.rowcount
@@ -271,13 +349,49 @@ def delete_group(group_id):
 
 
 def assign_contact_to_group(contact_id, group_id):
-    """Assign a contact to a group, or clear the group when group_id is None."""
+    """Add a contact to a group. Does not remove from other groups."""
+    conn = connect_db()
+    try:
+        cursor = conn.cursor()
+        # Check if contact exists
+        cursor.execute("SELECT id FROM contacts WHERE id = ?", (contact_id,))
+        if not cursor.fetchone():
+            raise ValueError("Contact not found.")
+        
+        # Check if group exists
+        if group_id is not None:
+            cursor.execute("SELECT id FROM groups WHERE id = ?", (group_id,))
+            if not cursor.fetchone():
+                raise ValueError("Group not found.")
+        
+        # Check if already assigned
+        cursor.execute(
+            "SELECT 1 FROM contact_groups WHERE contact_id = ? AND group_id = ?",
+            (contact_id, group_id)
+        )
+        if cursor.fetchone():
+            # Already assigned, no change needed
+            return 0
+        
+        # Add to group
+        cursor.execute(
+            "INSERT INTO contact_groups (contact_id, group_id) VALUES (?, ?)",
+            (contact_id, group_id)
+        )
+        conn.commit()
+        return cursor.rowcount
+    finally:
+        conn.close()
+
+
+def remove_contact_from_group(contact_id, group_id):
+    """Remove a contact from a group."""
     conn = connect_db()
     try:
         cursor = conn.cursor()
         cursor.execute(
-            "UPDATE contacts SET group_id = ? WHERE id = ?",
-            (group_id, contact_id),
+            "DELETE FROM contact_groups WHERE contact_id = ? AND group_id = ?",
+            (contact_id, group_id)
         )
         conn.commit()
         return cursor.rowcount
@@ -297,16 +411,30 @@ def get_contacts_by_group(group_id):
                 contacts.name,
                 contacts.phone,
                 contacts.email,
-                contacts.address,
-                contacts.group_id,
-                groups.name AS group_name
+                contacts.address
             FROM contacts
-            LEFT JOIN groups ON contacts.group_id = groups.id
-            WHERE contacts.group_id = ?
+            INNER JOIN contact_groups ON contacts.id = contact_groups.contact_id
+            WHERE contact_groups.group_id = ?
             ORDER BY LOWER(contacts.name), contacts.name
             """,
             (group_id,),
         )
-        return _contacts_from_rows(cursor.fetchall())
+        contacts = _contacts_from_rows(cursor.fetchall())
+        
+        # Fetch groups for each contact
+        for contact in contacts:
+            cursor.execute(
+                """
+                SELECT groups.id, groups.name
+                FROM groups
+                INNER JOIN contact_groups ON groups.id = contact_groups.group_id
+                WHERE contact_groups.contact_id = ?
+                ORDER BY groups.name
+                """,
+                (contact['id'],)
+            )
+            contact['groups'] = [dict(row) for row in cursor.fetchall()]
+        
+        return contacts
     finally:
         conn.close()
