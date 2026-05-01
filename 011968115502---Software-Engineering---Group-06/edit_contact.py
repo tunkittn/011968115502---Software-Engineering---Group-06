@@ -9,7 +9,9 @@ def edit_contact(contact_id, name, phone, email="", address="", group_id=None):
     clean_name, clean_phone, clean_email, clean_address, clean_group_id = (
         normalize_contact(name, phone, email, address, group_id)
     )
-    is_valid, message = validate_contact(clean_name, clean_phone, clean_email)
+    is_valid, message = validate_contact(
+        clean_name, clean_phone, clean_email, exclude_contact_id=contact_id
+    )
     if not is_valid:
         raise ValueError(message)
 

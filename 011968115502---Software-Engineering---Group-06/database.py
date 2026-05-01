@@ -151,6 +151,23 @@ def update_contact(contact_id, name, phone, email="", address="", group_id=None)
         conn.close()
 
 
+def phone_exists(phone, exclude_contact_id=None):
+    """Check if a phone number already exists in the database."""
+    conn = connect_db()
+    try:
+        cursor = conn.cursor()
+        if exclude_contact_id is None:
+            cursor.execute("SELECT id FROM contacts WHERE phone = ?", (phone,))
+        else:
+            cursor.execute(
+                "SELECT id FROM contacts WHERE phone = ? AND id != ?",
+                (phone, exclude_contact_id),
+            )
+        return cursor.fetchone() is not None
+    finally:
+        conn.close()
+
+
 def delete_contact(contact_id):
     """Delete a contact and return the number of affected rows."""
     conn = connect_db()
